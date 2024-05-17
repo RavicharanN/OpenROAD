@@ -1179,13 +1179,17 @@ class FlexGridGraph
                        const FlexMazeIdx& dstMazeIdx2,
                        const Point& centerPt);
   bool isExpandable(const FlexWavefrontGrid& currGrid, frDirEnum dir) const;
+  void mergeParallels(std::vector<int>& dirVec, std::vector<FlexWavefrontGrid>& dirToNextWfGrid,
+                           std::vector<FlexMazeIdx>& dirToNextIdx);
   FlexMazeIdx getTailIdx(const FlexMazeIdx& currIdx,
                          const FlexWavefrontGrid& currGrid) const;
   void expand(FlexWavefrontGrid& currGrid,
               const frDirEnum& dir,
               const FlexMazeIdx& dstMazeIdx1,
               const FlexMazeIdx& dstMazeIdx2,
-              const Point& centerPt);
+              const Point& centerPt,
+              std::vector<FlexWavefrontGrid>& dirToNextWfGrid,
+              std::vector<FlexMazeIdx>& dirToNextIdx);
   bool hasAlignedUpDefTrack(
       frLayerNum layerNum,
       const std::map<frLayerNum, frTrackPattern*>& xSubMap,

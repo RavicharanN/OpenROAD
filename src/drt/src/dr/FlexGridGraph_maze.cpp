@@ -29,6 +29,9 @@
 #include "dr/FlexDR.h"
 #include "dr/FlexDR_graphics.h"
 #include "dr/FlexGridGraph.h"
+#include <omp.h>
+#include <chrono>
+#include <unistd.h>
 
 namespace drt {
 
@@ -37,7 +40,9 @@ void FlexGridGraph::expand(FlexWavefrontGrid& currGrid,
                            const frDirEnum& dir,
                            const FlexMazeIdx& dstMazeIdx1,
                            const FlexMazeIdx& dstMazeIdx2,
-                           const Point& centerPt)
+                           const Point& centerPt,
+                           std::vector<FlexWavefrontGrid>& dirToNextWfGrid,
+                           std::vector<FlexMazeIdx>& dirToNextIdx)
 {
   frCost nextEstCost, nextPathCost;
   int gridX = currGrid.x();
@@ -125,28 +130,46 @@ void FlexGridGraph::expand(FlexWavefrontGrid& currGrid,
                                              nextWavefrontGrid.z())) {
     nextWavefrontGrid.setSrcTaperBox(currGrid.getSrcTaperBox());
   }
-  // update wavefront buffer
-  auto tailDir = nextWavefrontGrid.shiftAddBuffer(dir);
-  // non-buffer enablement is faster for ripup all
-  // commit grid prev direction if needed
-  auto tailIdx = getTailIdx(nextIdx, nextWavefrontGrid);
-  if (tailDir != frDirEnum::UNKNOWN) {
-    if (getPrevAstarNodeDir(tailIdx) == frDirEnum::UNKNOWN
-        || getPrevAstarNodeDir(tailIdx) == tailDir) {
-      setPrevAstarNodeDir(tailIdx.x(), tailIdx.y(), tailIdx.z(), tailDir);
+
+  dirToNextWfGrid[static_cast<int>(dir)] = nextWavefrontGrid;
+  dirToNextIdx[static_cast<int>(dir)] = nextIdx;
+}
+
+void FlexGridGraph::mergeParallels(std::vector<int>& dirVec, std::vector<FlexWavefrontGrid>& dirToNextWfGrid,
+                           std::vector<FlexMazeIdx>& dirToNextIdx)
+{
+  for (const auto dir : frDirEnumAll)
+  {
+    if (!dirVec[static_cast<int>(dir)])
+      continue;
+    
+    int idx = static_cast<int>(dir);
+    // std::cout << "Idx is: " << idx << "\n";
+    auto nextWavefrontGrid = dirToNextWfGrid[idx];
+    auto nextIdx = dirToNextIdx[idx];
+    // update wavefront buffer
+    auto tailDir = nextWavefrontGrid.shiftAddBuffer(dir);
+    // non-buffer enablement is faster for ripup all
+    // commit grid prev direction if needed
+    auto tailIdx = getTailIdx(nextIdx, nextWavefrontGrid);
+    if (tailDir != frDirEnum::UNKNOWN) {
+      if (getPrevAstarNodeDir(tailIdx) == frDirEnum::UNKNOWN
+          || getPrevAstarNodeDir(tailIdx) == tailDir) {
+        setPrevAstarNodeDir(tailIdx.x(), tailIdx.y(), tailIdx.z(), tailDir);
+        wavefront_.push(nextWavefrontGrid);
+      }
+    } else {
+      // add to wavefront
       wavefront_.push(nextWavefrontGrid);
     }
-  } else {
-    // add to wavefront
-    wavefront_.push(nextWavefrontGrid);
-  }
-  if (drWorker_->getDRIter() >= debugMazeIter) {
-    std::cout << "Creating " << nextWavefrontGrid.x() << " "
-              << nextWavefrontGrid.y() << " " << nextWavefrontGrid.z()
-              << " coords: " << xCoords_[nextWavefrontGrid.x()] << " "
-              << yCoords_[nextWavefrontGrid.y()] << " cost "
-              << nextWavefrontGrid.getCost() << " g "
-              << nextWavefrontGrid.getPathCost() << "\n";
+    if (drWorker_->getDRIter() >= debugMazeIter) {
+      std::cout << "Creating " << nextWavefrontGrid.x() << " "
+                << nextWavefrontGrid.y() << " " << nextWavefrontGrid.z()
+                << " coords: " << xCoords_[nextWavefrontGrid.x()] << " "
+                << yCoords_[nextWavefrontGrid.y()] << " cost "
+                << nextWavefrontGrid.getCost() << " g "
+                << nextWavefrontGrid.getPathCost() << "\n";
+    }
   }
 }
 
@@ -155,11 +178,28 @@ void FlexGridGraph::expandWavefront(FlexWavefrontGrid& currGrid,
                                     const FlexMazeIdx& dstMazeIdx2,
                                     const Point& centerPt)
 {
+  std::vector<int> dirVec(7, false);
+  std::vector<FlexWavefrontGrid> dirToNextWfGrid(7);
+  std::vector<FlexMazeIdx> dirToNextIdx(7);
+  // auto startTime = std::chrono::high_resolution_clock::now();
+  
+  # pragma omp parallel for num_threads(2)
   for (const auto dir : frDirEnumAll) {
     if (isExpandable(currGrid, dir)) {
-      expand(currGrid, dir, dstMazeIdx1, dstMazeIdx2, centerPt);
+      // int thread_id = omp_get_thread_num();
+      // int cpu_id = sched_getcpu();
+      // std::cout << "Thread" <<  thread_id << " is running on CPU" << cpu_id << "\n";
+      expand(currGrid, dir, dstMazeIdx1, dstMazeIdx2, centerPt, dirToNextWfGrid, dirToNextIdx);
+      dirVec[static_cast<int>(dir)] = 1;
     }
+    
   }
+  //sleep(1);
+  //auto endTime = std::chrono::high_resolution_clock::now();
+  //auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+  // std::cout << "Time taken: " << duration.count() << " microseconds" << std::endl;
+
+  mergeParallels(dirVec, dirToNextWfGrid, dirToNextIdx);
 }
 
 frCost FlexGridGraph::getEstCost(const FlexMazeIdx& src,

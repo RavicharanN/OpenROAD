@@ -40,6 +40,7 @@ namespace drt {
 class FlexWavefrontGrid
 {
  public:
+  FlexWavefrontGrid() = default;
   FlexWavefrontGrid(int xIn,
                     int yIn,
                     int zIn,
